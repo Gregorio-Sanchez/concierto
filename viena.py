@@ -4,7 +4,6 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
@@ -27,24 +26,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Crear carpeta para screenshots si no existe
+SCREENSHOT_DIR = 'screenshots'
+if not os.path.exists(SCREENSHOT_DIR):
+    os.makedirs(SCREENSHOT_DIR)
+
+# Función para tomar screenshot cuando hay error
+def take_screenshot(driver, step_name):
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f'{SCREENSHOT_DIR}/{step_name}_{timestamp}.png'
+        driver.save_screenshot(filename)
+        logger.info(f"Screenshot guardado: {filename}")
+        return filename
+    except Exception as e:
+        logger.error(f"Error al guardar screenshot: {e}")
+        return None
+
 # Función para iniciar un nuevo navegador
 def init_driver():
-    # Configurar opciones de Chrome para simular Japón
+    # Configurar opciones de Chrome
     chrome_options = Options()
     chrome_options.add_argument('--disable-logging')
-    chrome_options.add_argument('--log-level=3')  # Mínimo nivel de log
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")  # Desactiva las características de automatización
-    #chrome_options.add_argument('--headless')  # Para que no se abra la ventana del navegador (opcional)
+    chrome_options.add_argument('--log-level=3')
+    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    #chrome_options.add_argument('--headless')  # Descomenta para modo headless
 
     # Crear un servicio usando ChromeDriverManager
     service = Service(ChromeDriverManager().install())
 
     # Configura el controlador para Chrome utilizando el servicio
     driver = webdriver.Chrome(service=service, options=chrome_options)
+
+    # Eliminar la propiedad webdriver para evitar detección
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
     return driver
 
 # Inicializar Faker
-fake = Faker('ja_JP')  # Generar datos específicos para Japón
+fake = Faker('zh_CN')  # Generar datos específicos para China
 
 # Ruta del archivo para guardar el contador
 counter_file_path = 'counter.txt'
@@ -84,98 +106,226 @@ while True:
 
     try:
         # Iniciar el navegador
+        logger.info("Iniciando navegador...")
         driver = init_driver()
-        wait = WebDriverWait(driver, 10)
+        wait = WebDriverWait(driver, 15)
 
         # --- Paso 1: Cargar página ---
+        logger.info("Cargando página del formulario...")
         driver.get("https://verlosung.wienerphilharmoniker.at/en/form")
+        time.sleep(2)
 
         # --- Paso 2: Aceptar cookies ---
+        logger.info("Intentando aceptar cookies...")
         try:
             accept_cookies_button = wait.until(EC.element_to_be_clickable((By.CLASS_NAME, 'accept-cookie-settings')))
             accept_cookies_button.click()
-            time.sleep(3)
+            logger.info("Cookies aceptadas")
+            time.sleep(2)
         except TimeoutException:
-            logger.warning("Botón de cookies no encontrado, puede que ya estén aceptadas")
+            logger.info("Botón de cookies no visible, posiblemente ya aceptadas")
 
         # --- Paso 3: Selección de concierto ---
-        radio_button = driver.find_element(By.ID, 'id_konzert_2')
-        actions = ActionChains(driver)
-        actions.move_to_element(radio_button).perform()
-        wait.until(EC.element_to_be_clickable((By.ID, 'id_konzert_2')))
-        driver.execute_script("arguments[0].click();", radio_button)
-        time.sleep(13)
+        logger.info("Seleccionando concierto (New Years Concert)...")
+        try:
+            radio_button = wait.until(EC.presence_of_element_located((By.ID, 'id_konzert_2')))
+            driver.execute_script("arguments[0].scrollIntoView(true);", radio_button)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].click();", radio_button)
+            logger.info("Concierto seleccionado")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Error al seleccionar concierto: {e}")
+            take_screenshot(driver, "error_concierto")
+            raise
 
-        continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue to number of tickets and seat selection')]")))
-        continue_button.click()
-        time.sleep(13)
+        logger.info("Haciendo clic en botón 'Continue to number of tickets and seat selection'...")
+        try:
+            continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue to number of tickets and seat selection')]")))
+            continue_button.click()
+            logger.info("Avanzando a selección de asientos")
+            time.sleep(3)
+        except Exception as e:
+            logger.error(f"Error al hacer clic en botón de continuar: {e}")
+            take_screenshot(driver, "error_continue_1")
+            raise
 
         # --- Paso 4: Selección de asientos ---
-        wait.until(EC.presence_of_element_located((By.ID, 'id_anzahl')))
-        seat_select = Select(driver.find_element(By.ID, 'id_anzahl'))
-        seat_select.select_by_value('2')
+        logger.info("Seleccionando número de asientos...")
+        try:
+            seat_select_element = wait.until(EC.presence_of_element_located((By.ID, 'id_anzahl')))
+            seat_select = Select(seat_select_element)
+            seat_select.select_by_value('2')
+            logger.info("Seleccionados 2 asientos")
+            time.sleep(1)
+        except Exception as e:
+            logger.error(f"Error al seleccionar número de asientos: {e}")
+            take_screenshot(driver, "error_asientos")
+            raise
 
-        kategorie_radio_button = driver.find_element(By.ID, 'id_kategorie_0')
-        actions = ActionChains(driver)
-        actions.move_to_element(kategorie_radio_button).perform()
-        wait.until(EC.element_to_be_clickable((By.ID, 'id_kategorie_0')))
-        driver.execute_script("arguments[0].click();", kategorie_radio_button)
+        logger.info("Seleccionando categoría 1...")
+        try:
+            kategorie_radio_button = wait.until(EC.presence_of_element_located((By.ID, 'id_kategorie_0')))
+            driver.execute_script("arguments[0].scrollIntoView(true);", kategorie_radio_button)
+            time.sleep(0.5)
+            driver.execute_script("arguments[0].click();", kategorie_radio_button)
+            logger.info("Categoría 1 seleccionada")
+            time.sleep(2)
+        except Exception as e:
+            logger.error(f"Error al seleccionar categoría: {e}")
+            take_screenshot(driver, "error_categoria")
+            raise
 
-        continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue to personal data')]")))
-        continue_button.click()
-        time.sleep(13)
+        logger.info("Haciendo clic en 'Continue to personal data'...")
+        try:
+            continue_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Continue to personal data')]")))
+            # Hacer scroll al botón y esperar un poco
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", continue_button)
+            time.sleep(1)
+            # Intentar click con JavaScript para mayor confiabilidad
+            driver.execute_script("arguments[0].click();", continue_button)
+            logger.info("Botón clickeado, esperando carga de página de datos personales...")
+            time.sleep(3)
+
+            # Verificar que realmente llegamos a la página de datos personales
+            wait.until(EC.presence_of_element_located((By.ID, 'id_anrede')))
+            logger.info("Página de datos personales cargada correctamente")
+
+        except TimeoutException as e:
+            logger.error(f"La página de datos personales no cargó correctamente: {e}")
+            take_screenshot(driver, "error_pagina_no_cargada")
+            raise
+        except Exception as e:
+            logger.error(f"Error al hacer clic en botón de continuar: {e}")
+            take_screenshot(driver, "error_continue_2")
+            raise
 
         # --- Paso 5: Formulario personal ---
-        wait.until(EC.presence_of_element_located((By.ID, 'id_anrede')))
+        logger.info("Rellenando formulario personal...")
+        try:
+            # Esperar a que el formulario esté listo
+            time.sleep(2)
 
-        salutation_select = Select(driver.find_element(By.ID, 'id_anrede'))
-        salutation_select.select_by_value('Mr.')
+            # Salutation
+            logger.info("Seleccionando saludo...")
+            anrede_element = wait.until(EC.presence_of_element_located((By.ID, 'id_anrede')))
 
-        # driver.find_element(By.ID, 'id_titel').send_keys('Dr.')
-        simulate_typing(driver.find_element(By.ID, 'id_vorname'), fake.first_name_male())
-        simulate_typing(driver.find_element(By.ID, 'id_nachname'), fake.last_name())
-        simulate_typing(driver.find_element(By.ID, 'id_adresse'), fake.address())
-        simulate_typing(driver.find_element(By.ID, 'id_plz'), fake.zipcode())
-        simulate_typing(driver.find_element(By.ID, 'id_ort'), fake.city())
+            # Verificar que es un select
+            if anrede_element.tag_name != 'select':
+                logger.error(f"Elemento id_anrede es un {anrede_element.tag_name}, no un select")
+                take_screenshot(driver, "error_anrede_not_select")
+                raise Exception(f"id_anrede no es un elemento select")
 
-        country_select = Select(driver.find_element(By.ID, 'id_country'))
-        country_select.select_by_value('118')
+            salutation_select = Select(anrede_element)
+            salutation_select.select_by_value('Mr.')
+            logger.info("Saludo seleccionado")
+            time.sleep(0.5)
 
-        email = f'espinardonacionusa+{counter}@gmail.com'
-        driver.find_element(By.ID, 'id_email').send_keys(email)
-        driver.find_element(By.ID, 'id_email_confirm').send_keys(email)
+            # Generar datos
+            first_name = fake.first_name_male()
+            last_name = fake.last_name()
+            address = fake.address()
+            zipcode = fake.postcode()
+            city = fake.city()
 
-        if driver.find_element(By.ID, 'id_newsletter').is_selected():
-            driver.find_element(By.ID, 'id_newsletter').click()
+            logger.info(f"Generando datos ficticios para: {first_name} {last_name}")
+
+            # Rellenar campos
+            simulate_typing(driver.find_element(By.ID, 'id_vorname'), first_name)
+            simulate_typing(driver.find_element(By.ID, 'id_nachname'), last_name)
+            simulate_typing(driver.find_element(By.ID, 'id_adresse'), address)
+            simulate_typing(driver.find_element(By.ID, 'id_plz'), zipcode)
+            simulate_typing(driver.find_element(By.ID, 'id_ort'), city)
+
+            # País (Japón = 118)
+            logger.info("Seleccionando país...")
+            country_element = driver.find_element(By.ID, 'id_country')
+
+            # Verificar que es un select
+            if country_element.tag_name != 'select':
+                logger.error(f"Elemento id_country es un {country_element.tag_name}, no un select")
+                take_screenshot(driver, "error_country_not_select")
+                raise Exception(f"id_country no es un elemento select")
+
+            country_select = Select(country_element)
+            country_select.select_by_value('51')
+            logger.info("País seleccionado: China")
+            time.sleep(0.5)
+
+            # Email
+            email = f'discorevivalfilipino1+{counter}@gmail.com'
+            driver.find_element(By.ID, 'id_email').send_keys(email)
+            driver.find_element(By.ID, 'id_email_confirm').send_keys(email)
+            logger.info(f"Email: {email}")
+            time.sleep(0.5)
+
+            # Desmarcar newsletter si está marcado
+            if driver.find_element(By.ID, 'id_newsletter').is_selected():
+                driver.find_element(By.ID, 'id_newsletter').click()
+                logger.info("Newsletter desmarcado")
+
+            time.sleep(1)
+
+        except Exception as e:
+            logger.error(f"Error al rellenar formulario personal: {e}")
+            take_screenshot(driver, "error_formulario")
+            raise
 
         # --- Paso 6: Envío del formulario ---
-        submit_button = driver.find_element(By.CSS_SELECTOR, 'button[type="submit"]')
-        submit_button.click()
-        time.sleep(15)
-
-        # Guardar contador antes de la confirmación final
-        counter += 1
-        save_counter(counter)
+        logger.info("Enviando formulario (Confirm Data)...")
+        try:
+            submit_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'button[type="submit"]')))
+            submit_button.click()
+            logger.info("Formulario enviado, esperando confirmación...")
+            time.sleep(5)
+        except Exception as e:
+            logger.error(f"Error al enviar formulario: {e}")
+            take_screenshot(driver, "error_submit_1")
+            raise
 
         # --- Paso 7: Confirmación final ---
-        submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Take part in the drawing now')]")))
-        submit_button.click()
-        time.sleep(25)
+        logger.info("Buscando botón de confirmación final...")
+        try:
+            submit_button = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Take part in the drawing now')]")))
+            submit_button.click()
+            logger.info("Confirmación final enviada")
+            time.sleep(10)
 
-        # --- Éxito ---
-        success = True
-        logger.info(f"Iteración {counter} completada con email: espinardonacionusa+{counter - 1}@gmail.com")
+            # Guardar contador después de la confirmación exitosa
+            counter += 1
+            save_counter(counter)
+
+            # --- Éxito ---
+            success = True
+            logger.info(f"✓ Iteración {counter - 1} COMPLETADA EXITOSAMENTE")
+            logger.info(f"  Email usado: espinardonacion+{counter - 1}@gmail.com")
+            take_screenshot(driver, "exito")
+
+        except Exception as e:
+            logger.error(f"Error en confirmación final: {e}")
+            take_screenshot(driver, "error_final")
+            raise
 
     except TimeoutException as e:
         logger.error(f"Timeout esperando elemento: {e}")
+        if driver:
+            take_screenshot(driver, "timeout_error")
     except NoSuchElementException as e:
         logger.error(f"Elemento no encontrado: {e}")
+        if driver:
+            take_screenshot(driver, "element_not_found")
     except ElementNotInteractableException as e:
         logger.error(f"Elemento no interactuable: {e}")
+        if driver:
+            take_screenshot(driver, "element_not_interactable")
     except WebDriverException as e:
         logger.error(f"Error del WebDriver: {e}")
+        if driver:
+            take_screenshot(driver, "webdriver_error")
     except Exception as e:
         logger.error(f"Error inesperado: {e}")
+        if driver:
+            take_screenshot(driver, "unexpected_error")
     finally:
         if driver:
             try:
@@ -184,7 +334,7 @@ while True:
                 logger.warning("No se pudo cerrar el navegador correctamente")
 
     # Espera entre iteraciones (siempre se ejecuta)
-    random_interval = random.randint(15, 18) * 60
+    random_interval = random.randint(10, 13) * 60
     if success:
         logger.info(f"Esperando {random_interval / 60:.0f} minutos antes de la siguiente ejecución...")
     else:
